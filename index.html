@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Futuristic Grid Background</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000000;
+        }
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        (function() {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const GRID_COLOR = '#33cccc';
+            const SQUARE_COLORS = ['#23D2D7', '#E55ED6'];
+            
+            const CONFIG = {
+                gridSize: 60,
+                lineWidth: 0.5,
+                lineGlow: 3,
+                lineOpacity: 0.35,
+                vignetteSize: 300,
+                squareCount: 30,
+                squareOpacity: 0.55,
+                squareGlow: 20,
+                minCooldown: 800,
+                maxCooldown: 3000,
+                lerpSpeed: 0.03
+            };
+            
+            let width, height;
+            let cols, rows;
+            let squares = [];
+            let mouse = { x: null, y: null, active: false, col: -1, row: -1 };
+            let gridPulse = 0;
+            let time = 0;
+            let lastRandomMoveTime = 0;
+            const RANDOM_MOVE_INTERVAL = 3000;
+            
+            function resize() {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+                cols = Math.floor(width / CONFIG.gridSize);
+                rows = Math.floor(height / CONFIG.gridSize);
+                if (squares.length === 0) {
+                    initSquares();
+                }
+            }
+            
+            function randomColor() {
+                return SQUARE_COLORS[Math.floor(Math.random() * SQUARE_COLORS.length)];
+            }
+            
+            function randomCooldown() {
+                return CONFIG.minCooldown + Math.random() * (CONFIG.maxCooldown - CONFIG.minCooldown);
+            }
+            
+            function initSquares() {
+                squares = [];
+                const now = performance.now();
+                for (let i = 0; i < CONFIG.squareCount; i++) {
+                    const col = Math.floor(Math.random() * cols);
+                    const row = Math.floor(Math.random() * rows);
+                    
+                    squares.push({
+                        originalCol: col,
+                        originalRow: row,
+                        currentCol: col,
+                        currentRow: row,
+                        targetCol: col,
+                        targetRow: row,
+                        displayX: col,
+                        displayY: row,
+                        color: randomColor(),
+                        depth: Math.random(),
+                        lastStepTime: now - Math.random() * CONFIG.maxCooldown,
+                        cooldown: Math.random() * CONFIG.maxCooldown,
+                        pulse: Math.random() * Math.PI * 2,
+                        pulseSpeed: 0.003 + Math.random() * 0.003
+                    });
+                }
+                squares.sort((a, b) => a.depth - b.depth);
+            }
+            
+            function hexToRgb(hex) {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? {
+                    r: parseInt(result[1], 16),
+                    g: parseInt(result[2], 16),
+                    b: parseInt(result[3], 16)
+                } : { r: 255, g: 255, b: 255 };
+            }
+            
+            function drawGradientOverlay() {
+                const gradient = ctx.createLinearGradient(0, 0, width, height);
+                gradient.addColorStop(0, 'rgba(100, 50, 150, 0.03)');
+                gradient.addColorStop(0.5, 'rgba(50, 100, 150, 0.02)');
+                gradient.addColorStop(1, 'rgba(30, 150, 150, 0.03)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, width, height);
+            }
+            
+            function drawVignette() {
+                const gradient = ctx.createRadialGradient(
+                    width / 2, height / 2, 
+                    Math.min(width, height) * 0.2,
+                    width / 2, height / 2,
+                    Math.max(width, height) * 0.75
+                );
+                gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.3)');
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0.95)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, width, height);
+                
+                const edgeGradientTop = ctx.createLinearGradient(0, 0, 0, CONFIG.vignetteSize);
+                edgeGradientTop.addColorStop(0, 'rgba(0, 0, 0, 1)');
+                edgeGradientTop.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = edgeGradientTop;
+                ctx.fillRect(0, 0, width, CONFIG.vignetteSize);
+                
+                const edgeGradientBottom = ctx.createLinearGradient(0, height - CONFIG.vignetteSize, 0, height);
+                edgeGradientBottom.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                edgeGradientBottom.addColorStop(1, 'rgba(0, 0, 0, 1)');
+                ctx.fillStyle = edgeGradientBottom;
+                ctx.fillRect(0, height - CONFIG.vignetteSize, width, CONFIG.vignetteSize);
+                
+                const edgeGradientLeft = ctx.createLinearGradient(0, 0, CONFIG.vignetteSize, 0);
+                edgeGradientLeft.addColorStop(0, 'rgba(0, 0, 0, 1)');
+                edgeGradientLeft.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = edgeGradientLeft;
+                ctx.fillRect(0, 0, CONFIG.vignetteSize, height);
+                
+                const edgeGradientRight = ctx.createLinearGradient(width - CONFIG.vignetteSize, 0, width, 0);
+                edgeGradientRight.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                edgeGradientRight.addColorStop(1, 'rgba(0, 0, 0, 1)');
+                ctx.fillStyle = edgeGradientRight;
+                ctx.fillRect(width - CONFIG.vignetteSize, 0, CONFIG.vignetteSize, height);
+            }
+            
+            function drawGrid() {
+                gridPulse += 0.008;
+                const pulseOpacity = CONFIG.lineOpacity * (0.8 + Math.sin(gridPulse) * 0.2);
+                const rgb = hexToRgb(GRID_COLOR);
+                
+                ctx.save();
+                ctx.shadowColor = GRID_COLOR;
+                ctx.shadowBlur = CONFIG.lineGlow;
+                ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${pulseOpacity})`;
+                ctx.lineWidth = CONFIG.lineWidth;
+                ctx.lineCap = 'square';
+                
+                for (let i = 0; i <= cols; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(i * CONFIG.gridSize, 0);
+                    ctx.lineTo(i * CONFIG.gridSize, height);
+                    ctx.stroke();
+                }
+                
+                for (let i = 0; i <= rows; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, i * CONFIG.gridSize);
+                    ctx.lineTo(width, i * CONFIG.gridSize);
+                    ctx.stroke();
+                }
+                
+                ctx.restore();
+            }
+            
+            function takeStepTowardTarget(sq) {
+                const dCol = sq.targetCol - sq.currentCol;
+                const dRow = sq.targetRow - sq.currentRow;
+                
+                if (dCol === 0 && dRow === 0) return;
+                
+                if (Math.abs(dCol) >= Math.abs(dRow)) {
+                    if (dCol > 0) sq.currentCol++;
+                    else if (dCol < 0) sq.currentCol--;
+                } else {
+                    if (dRow > 0) sq.currentRow++;
+                    else if (dRow < 0) sq.currentRow--;
+                }
+                
+                sq.currentCol = Math.max(0, Math.min(cols - 1, sq.currentCol));
+                sq.currentRow = Math.max(0, Math.min(rows - 1, sq.currentRow));
+            }
+            
+            function takeRandomStep(sq) {
+                const directions = [
+                    { dc: 0, dr: -1 },
+                    { dc: 0, dr: 1 },
+                    { dc: -1, dr: 0 },
+                    { dc: 1, dr: 0 }
+                ];
+                const validDirs = directions.filter(d => {
+                    const newCol = sq.currentCol + d.dc;
+                    const newRow = sq.currentRow + d.dr;
+                    return newCol >= 0 && newCol < cols && newRow >= 0 && newRow < rows;
+                });
+                if (validDirs.length > 0) {
+                    const dir = validDirs[Math.floor(Math.random() * validDirs.length)];
+                    sq.currentCol += dir.dc;
+                    sq.currentRow += dir.dr;
+                }
+            }
+            
+            function updateSquares(currentTime) {
+                for (let sq of squares) {
+                    sq.pulse += sq.pulseSpeed;
+                    
+                    if (mouse.active) {
+                        sq.targetCol = mouse.col;
+                        sq.targetRow = mouse.row;
+                        
+                        if (currentTime - sq.lastStepTime >= sq.cooldown) {
+                            takeStepTowardTarget(sq);
+                            sq.lastStepTime = currentTime;
+                            sq.cooldown = randomCooldown();
+                        }
+                    } else {
+                        const atHome = sq.currentCol === sq.originalCol && sq.currentRow === sq.originalRow;
+                        
+                        if (!atHome) {
+                            sq.targetCol = sq.originalCol;
+                            sq.targetRow = sq.originalRow;
+                            
+                            if (currentTime - sq.lastStepTime >= sq.cooldown) {
+                                takeStepTowardTarget(sq);
+                                sq.lastStepTime = currentTime;
+                                sq.cooldown = randomCooldown();
+                            }
+                        }
+                    }
+                    
+                    sq.displayX += (sq.currentCol - sq.displayX) * CONFIG.lerpSpeed;
+                    sq.displayY += (sq.currentRow - sq.displayY) * CONFIG.lerpSpeed;
+                }
+                
+                if (!mouse.active && currentTime - lastRandomMoveTime >= RANDOM_MOVE_INTERVAL) {
+                    const allHome = squares.every(sq => 
+                        sq.currentCol === sq.originalCol && sq.currentRow === sq.originalRow
+                    );
+                    if (allHome) {
+                        const randomSquare = squares[Math.floor(Math.random() * squares.length)];
+                        takeRandomStep(randomSquare);
+                        randomSquare.originalCol = randomSquare.currentCol;
+                        randomSquare.originalRow = randomSquare.currentRow;
+                    }
+                    lastRandomMoveTime = currentTime;
+                }
+            }
+            
+            function drawSquare(sq) {
+                const x = sq.displayX * CONFIG.gridSize;
+                const y = sq.displayY * CONFIG.gridSize;
+                const size = CONFIG.gridSize;
+                const inset = 0;
+                
+                const rgb = hexToRgb(sq.color);
+                const breathe = 0.85 + Math.sin(sq.pulse) * 0.15;
+                const baseOpacity = CONFIG.squareOpacity * breathe;
+                
+                ctx.save();
+                
+                ctx.shadowColor = sq.color;
+                ctx.shadowBlur = CONFIG.squareGlow * breathe;
+                
+                const frostedGradient = ctx.createLinearGradient(x, y, x + size, y + size);
+                frostedGradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${baseOpacity * 0.25})`);
+                frostedGradient.addColorStop(0.4, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${baseOpacity * 0.4})`);
+                frostedGradient.addColorStop(0.6, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${baseOpacity * 0.35})`);
+                frostedGradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${baseOpacity * 0.2})`);
+                
+                ctx.fillStyle = frostedGradient;
+                ctx.fillRect(x + inset, y + inset, size - inset * 2, size - inset * 2);
+                
+                const innerGlow = ctx.createRadialGradient(
+                    x + size * 0.5, y + size * 0.5, 0,
+                    x + size * 0.5, y + size * 0.5, size * 0.5
+                );
+                innerGlow.addColorStop(0, `rgba(${Math.min(255, rgb.r + 80)}, ${Math.min(255, rgb.g + 80)}, ${Math.min(255, rgb.b + 80)}, ${baseOpacity * 0.2})`);
+                innerGlow.addColorStop(0.5, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${baseOpacity * 0.1})`);
+                innerGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = innerGlow;
+                ctx.fillRect(x + inset, y + inset, size - inset * 2, size - inset * 2);
+                
+                ctx.shadowBlur = 0;
+                
+                const topEdge = ctx.createLinearGradient(x, y + inset, x, y + inset + 8);
+                topEdge.addColorStop(0, `rgba(255, 255, 255, ${baseOpacity * 0.3})`);
+                topEdge.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = topEdge;
+                ctx.fillRect(x + inset, y + inset, size - inset * 2, 8);
+                
+                const leftEdge = ctx.createLinearGradient(x + inset, y, x + inset + 6, y);
+                leftEdge.addColorStop(0, `rgba(255, 255, 255, ${baseOpacity * 0.2})`);
+                leftEdge.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = leftEdge;
+                ctx.fillRect(x + inset, y + inset, 6, size - inset * 2);
+                
+                const highlightSize = 8;
+                const hx = x + inset + 6;
+                const hy = y + inset + 6;
+                const highlight = ctx.createRadialGradient(hx, hy, 0, hx, hy, highlightSize);
+                highlight.addColorStop(0, `rgba(255, 255, 255, ${baseOpacity * 0.8})`);
+                highlight.addColorStop(0.3, `rgba(255, 255, 255, ${baseOpacity * 0.3})`);
+                highlight.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = highlight;
+                ctx.beginPath();
+                ctx.arc(hx, hy, highlightSize, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = `rgba(${Math.min(255, rgb.r + 40)}, ${Math.min(255, rgb.g + 40)}, ${Math.min(255, rgb.b + 40)}, ${baseOpacity * 0.6})`;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + inset + 0.5, y + inset + 0.5, size - inset * 2 - 1, size - inset * 2 - 1);
+                
+                ctx.strokeStyle = `rgba(255, 255, 255, ${baseOpacity * 0.15})`;
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(x + inset + 1, y + inset + 1);
+                ctx.lineTo(x + size - inset - 1, y + inset + 1);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x + inset + 1, y + inset + 1);
+                ctx.lineTo(x + inset + 1, y + size - inset - 1);
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+            
+            function animate(currentTime) {
+                time = currentTime;
+                
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, width, height);
+                
+                drawGradientOverlay();
+                drawGrid();
+                
+                updateSquares(currentTime);
+                
+                for (let sq of squares) {
+                    drawSquare(sq);
+                }
+                
+                drawVignette();
+                
+                requestAnimationFrame(animate);
+            }
+            
+            function handleMouseMove(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = e.clientX - rect.left;
+                mouse.y = e.clientY - rect.top;
+                mouse.col = Math.floor(mouse.x / CONFIG.gridSize);
+                mouse.row = Math.floor(mouse.y / CONFIG.gridSize);
+                mouse.col = Math.max(0, Math.min(cols - 1, mouse.col));
+                mouse.row = Math.max(0, Math.min(rows - 1, mouse.row));
+                mouse.active = true;
+            }
+            
+            function handleMouseLeave() {
+                mouse.active = false;
+            }
+            
+            function handleTouchMove(e) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = touch.clientX - rect.left;
+                mouse.y = touch.clientY - rect.top;
+                mouse.col = Math.floor(mouse.x / CONFIG.gridSize);
+                mouse.row = Math.floor(mouse.y / CONFIG.gridSize);
+                mouse.col = Math.max(0, Math.min(cols - 1, mouse.col));
+                mouse.row = Math.max(0, Math.min(rows - 1, mouse.row));
+                mouse.active = true;
+            }
+            
+            function handleTouchEnd() {
+                mouse.active = false;
+            }
+            
+            window.addEventListener('resize', resize);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseleave', handleMouseLeave);
+            canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+            canvas.addEventListener('touchend', handleTouchEnd);
+            
+            resize();
+            requestAnimationFrame(animate);
+        })();
+    </script>
+</body>
+</html>
